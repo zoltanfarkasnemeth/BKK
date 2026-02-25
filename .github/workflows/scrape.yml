@@ -1,9 +1,8 @@
 name: BKK Adatgyűjtő
-
 on:
   schedule:
-    - cron: '*/10 * * * *' # Futtatás 10 percenként
-  workflow_dispatch: # Manuális indítás lehetősége
+    - cron: '*/2 * * * *'
+  workflow_dispatch:
 
 jobs:
   build:
@@ -28,5 +27,5 @@ jobs:
           git config --global user.name 'GitHub Actions Bot'
           git config --global user.email 'actions@github.com'
           git add data.xlsx
-          git commit -m "Automata adatfrissítés: $(date)" || echo "Nincs változás"
+          git commit -m "Frissítés: $(date) | Sorok: $(python -c "import pandas as pd; print(len(pd.read_excel('data.xlsx')))")" || echo "Nincs változás"
           git push
