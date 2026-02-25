@@ -71,14 +71,31 @@ def fetch_and_save():
         # --- KÖVETKEZŐ FUTÁSOK ---
         try:
             df_old = pd.read_excel(EXCEL_FILE)
-            df_old["change_id"]  = df_old["change_id"].astype(str)
-            df_old["start_date"] = df_old["start_date"].astype(str)
-            df_old["end_date"]   = df_old["end_date"].astype(str)
 
+            # Régi Excel oszlopok normalizálása - hiányzó oszlopok pótlása
+            df_old["change_id"]  = df_old["change_id"].astype(str) if "change_id" in df_old.columns else ""
+            df_old["start_date"] = df_old["start_date"].astype(str) if "start_date" in df_old.columns else "-"
+            df_old["end_date"]   = df_old["end_date"].astype(str) if "end_date" in df_old.columns else "-"
+
+            # statusz oszlop: ha nincs, mindenkit AKTIV-nak tekintünk
+            if "statusz" not in df_old.columns:
+                print("FIGYELEM: 'statusz' oszlop hiányzott – minden meglévő sor AKTIV-nak jelölve.")
+                df_old["statusz"] = "AKTIV"
+
+            # Lejarva_Ideje oszlop: ha nincs, üres
             if "Lejarva_Ideje" not in df_old.columns:
+                print("FIGYELEM: 'Lejarva_Ideje' oszlop hiányzott – létrehozva.")
                 df_old["Lejarva_Ideje"] = ""
             else:
                 df_old["Lejarva_Ideje"] = df_old["Lejarva_Ideje"].astype(str).replace("nan", "")
+
+            # Rogzites_Ideje oszlop: ha nincs, üres
+            if "Rogzites_Ideje" not in df_old.columns:
+                df_old["Rogzites_Ideje"] = ""
+
+            # pivot_id oszlop: ha nincs, üres
+            if "pivot_id" not in df_old.columns:
+                df_old["pivot_id"] = ""
 
         except Exception as e:
             print(f"Excel olvasási hiba, újrakezdés: {e}")
@@ -93,7 +110,7 @@ def fetch_and_save():
         for idx, row in df_old.iterrows():
             if row["statusz"] == "AKTIV" and row["change_id"] not in api_ids:
                 print(f"LEZÁRT: change_id={row['change_id']} eltűnt az API-ból.")
-                df_old.at[idx, "statusz"]      = "LEZART"
+                df_old.at[idx, "statusz"]       = "LEZART"
                 df_old.at[idx, "Lejarva_Ideje"] = current_timestamp
                 változott = True
 
@@ -108,6 +125,10 @@ def fetch_and_save():
         if not változott:
             print("Nincs változás – Excel nem módosul.")
             return
+
+        # Oszlopok sorrendje
+        col_order = ["change_id", "pivot_id", "start_date", "end_date", "statusz", "Rogzites_Ideje", "Lejarva_Ideje"]
+        df_old = df_old[col_order]
 
         df_old.to_excel(EXCEL_FILE, index=False)
         print(f"Excel frissítve. Összes sor: {len(df_old)}")
