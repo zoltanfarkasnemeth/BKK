@@ -59,7 +59,10 @@ def fetch_and_save():
                 })
 
         df_api = pd.DataFrame(api_rows)
-        print(f"API-ból feldolgozott sorok: {len(df_api)}")
+
+        # Duplikáció szűrés az API válaszon belül is (change_id + pivot_id együtt egyedi)
+        df_api = df_api.drop_duplicates(subset=["change_id", "pivot_id"], keep="first")
+        print(f"API-ból feldolgozott sorok (duplikáció után): {len(df_api)}")
 
         # ================================================================
         # ELSŐ FUTÁS: Excel nem létezik VAGY üres/hibás → mindent mentünk
@@ -86,28 +89,35 @@ def fetch_and_save():
         # ================================================================
         df_old = pd.read_excel(EXCEL_FILE)
         df_old["change_id"]     = df_old["change_id"].astype(str)
+        df_old["pivot_id"]      = df_old["pivot_id"].astype(str)
         df_old["start_date"]    = df_old["start_date"].astype(str)
         df_old["end_date"]      = df_old["end_date"].astype(str)
         df_old["statusz"]       = df_old["statusz"].astype(str)
         df_old["Lejarva_Ideje"] = df_old["Lejarva_Ideje"].fillna("").astype(str).replace("nan", "")
 
-        api_ids      = set(df_api["change_id"].astype(str))
-        existing_ids = set(df_old["change_id"].astype(str))
-        változott    = False
+        # Összetett kulcs: change_id + pivot_id
+        api_keys      = set(zip(df_api["change_id"].astype(str), df_api["pivot_id"].astype(str)))
+        existing_keys = set(zip(df_old["change_id"].astype(str), df_old["pivot_id"].astype(str)))
+        változott     = False
 
         # 1. LEZÁRT: AKTIV volt, de eltűnt az API-ból
         for idx, row in df_old.iterrows():
-            if row["statusz"] == "AKTIV" and row["change_id"] not in api_ids:
-                print(f"LEZÁRT: change_id={row['change_id']} eltűnt az API-ból.")
+            key = (str(row["change_id"]), str(row["pivot_id"]))
+            if row["statusz"] == "AKTIV" and key not in api_keys:
+                print(f"LEZÁRT: change_id={row['change_id']}, pivot_id={row['pivot_id']} eltűnt az API-ból.")
                 df_old.at[idx, "statusz"]       = "LEZART"
                 df_old.at[idx, "Lejarva_Ideje"] = current_timestamp
                 változott = True
 
-        # 2. ÚJ: API-ban van, de Excelben még nincs
-        new_ids = api_ids - existing_ids
-        if new_ids:
-            df_uj = df_api[df_api["change_id"].isin(new_ids)].copy()
-            print(f"ÚJ bejegyzések: {len(df_uj)} db – change_id-k: {list(new_ids)}")
+        # 2. ÚJ: API-ban van, de Excelben még nincs (change_id + pivot_id páros alapján)
+        new_keys = api_keys - existing_keys
+        if new_keys:
+            mask = [
+                (str(r["change_id"]), str(r["pivot_id"])) in new_keys
+                for _, r in df_api.iterrows()
+            ]
+            df_uj = df_api[mask].copy()
+            print(f"ÚJ bejegyzések: {len(df_uj)} db")
             df_old = pd.concat([df_old, df_uj], ignore_index=True)
             változott = True
 
