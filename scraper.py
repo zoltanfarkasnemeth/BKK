@@ -14,135 +14,110 @@ def fetch_and_save():
     try:
         current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         print(f"[{current_timestamp}] API lekérés indítása...")
-        
+
         response = requests.get(API_URL, headers=headers, timeout=20)
         print(f"HTTP státusz: {response.status_code}")
-        
+
         if response.status_code != 200:
-            print(f"Hiba: {response.status_code}")
-            print(f"Válasz tartalom: {response.text[:500]}")
+            print(f"Hiba: {response.status_code} - {response.text[:300]}")
             return
 
-        # Debug: nyers válasz kiírása
-        raw = response.text
-        print(f"Nyers válasz (első 500 kar): {raw[:500]}")
-
         data = response.json()
-        print(f"JSON típusa: {type(data)}")
-        
-        if isinstance(data, list):
-            print(f"Bejegyzések száma: {len(data)}")
-            if len(data) > 0:
-                print(f"Első bejegyzés kulcsai: {list(data[0].keys())}")
-        elif isinstance(data, dict):
-            print(f"Dict kulcsok: {list(data.keys())}")
+        print(f"JSON típusa: {type(data)}, hossza: {len(data) if isinstance(data, list) else 'dict'}")
 
-        new_rows = []
+        # --- API adatok feldolgozása ---
+        api_rows = []
+        items = data if isinstance(data, list) else data.get("data", data.get("changes", data.get("results", [])))
 
-        if isinstance(data, list) and len(data) > 0:
-            for entry in data:
-                change_id = entry.get("id")
-                start_date = entry.get("start_date")
-                end_date = entry.get("end_date")
-                effects = entry.get("effects", [])
+        for entry in items:
+            change_id  = str(entry.get("id", ""))
+            start_date = entry.get("start_date", "-")
+            end_date   = entry.get("end_date",   "-")
+            effects    = entry.get("effects", [])
 
-                if effects:
-                    for effect in effects:
-                        pivot = effect.get("pivot", {})
-                        if pivot:
-                            new_rows.append({
-                                "Rogzites_Ideje": current_timestamp,
-                                "id": pivot.get("id"),
-                                "change_id": change_id,
-                                "start_date": start_date,
-                                "end_date": end_date
-                            })
-                        else:
-                            # Van effect, de nincs pivot
-                            new_rows.append({
-                                "Rogzites_Ideje": current_timestamp,
-                                "id": "NINCS_PIVOT",
-                                "change_id": change_id,
-                                "start_date": start_date,
-                                "end_date": end_date
-                            })
-                else:
-                    # Nincs effect
-                    new_rows.append({
+            if effects:
+                for effect in effects:
+                    pivot = effect.get("pivot", {})
+                    api_rows.append({
+                        "change_id":      change_id,
+                        "pivot_id":       str(pivot.get("id", "NINCS_PIVOT")) if pivot else "NINCS_PIVOT",
+                        "start_date":     start_date,
+                        "end_date":       end_date,
+                        "statusz":        "AKTIV",
                         "Rogzites_Ideje": current_timestamp,
-                        "id": "NINCS_EFFECT",
-                        "change_id": change_id,
-                        "start_date": start_date,
-                        "end_date": end_date
+                        "Lejarva_Ideje":  ""
                     })
+            else:
+                api_rows.append({
+                    "change_id":      change_id,
+                    "pivot_id":       "NINCS_EFFECT",
+                    "start_date":     start_date,
+                    "end_date":       end_date,
+                    "statusz":        "AKTIV",
+                    "Rogzites_Ideje": current_timestamp,
+                    "Lejarva_Ideje":  ""
+                })
 
-        elif isinstance(data, dict):
-            # Ha dict formátumban jön az adat (pl. {"data": [...]} )
-            items = data.get("data", data.get("changes", data.get("results", [])))
-            print(f"Dict-ből kinyert lista hossza: {len(items)}")
-            for entry in items:
-                change_id = entry.get("id")
-                start_date = entry.get("start_date")
-                end_date = entry.get("end_date")
-                effects = entry.get("effects", [])
+        df_api = pd.DataFrame(api_rows)
+        print(f"API-ból feldolgozott sorok: {len(df_api)}")
 
-                if effects:
-                    for effect in effects:
-                        pivot = effect.get("pivot", {})
-                        new_rows.append({
-                            "Rogzites_Ideje": current_timestamp,
-                            "id": pivot.get("id") if pivot else "NINCS_PIVOT",
-                            "change_id": change_id,
-                            "start_date": start_date,
-                            "end_date": end_date
-                        })
-                else:
-                    new_rows.append({
-                        "Rogzites_Ideje": current_timestamp,
-                        "id": "NINCS_EFFECT",
-                        "change_id": change_id,
-                        "start_date": start_date,
-                        "end_date": end_date
-                    })
-        else:
-            print("FIGYELEM: Üres vagy ismeretlen API válasz!")
-            new_rows.append({
-                "Rogzites_Ideje": current_timestamp,
-                "id": "HIBA",
-                "change_id": "URES_API_VALASZ",
-                "start_date": "-",
-                "end_date": "-"
-            })
+        # --- ELSŐ FUTÁS: nincs még Excel ---
+        if not os.path.exists(EXCEL_FILE):
+            print("Első futás – minden adat mentése.")
+            df_api.to_excel(EXCEL_FILE, index=False)
+            print(f"Elmentve {len(df_api)} sor.")
+            return
 
-        print(f"Új sorok száma: {len(new_rows)}")
+        # --- KÖVETKEZŐ FUTÁSOK ---
+        try:
+            df_old = pd.read_excel(EXCEL_FILE)
+            df_old["change_id"]  = df_old["change_id"].astype(str)
+            df_old["start_date"] = df_old["start_date"].astype(str)
+            df_old["end_date"]   = df_old["end_date"].astype(str)
 
-        df_new = pd.DataFrame(new_rows)
+            if "Lejarva_Ideje" not in df_old.columns:
+                df_old["Lejarva_Ideje"] = ""
+            else:
+                df_old["Lejarva_Ideje"] = df_old["Lejarva_Ideje"].astype(str).replace("nan", "")
 
-        # Excel összefűzés
-        if os.path.exists(EXCEL_FILE):
-            try:
-                df_old = pd.read_excel(EXCEL_FILE)
-                print(f"Meglévő Excel sorok száma: {len(df_old)}")
-                if not df_old.empty:
-                    df_final = pd.concat([df_old, df_new], ignore_index=True)
-                else:
-                    df_final = df_new
-            except Exception as e:
-                print(f"Excel olvasási hiba (új fájl kezdése): {e}")
-                df_final = df_new
-        else:
-            print("Excel fájl nem létezik, új fájl létrehozása.")
-            df_final = df_new
+        except Exception as e:
+            print(f"Excel olvasási hiba, újrakezdés: {e}")
+            df_api.to_excel(EXCEL_FILE, index=False)
+            return
 
-        df_final.to_excel(EXCEL_FILE, index=False)
-        print(f"Sikeresen mentve. Összes sor az Excelben: {len(df_final)}")
+        api_ids      = set(df_api["change_id"].astype(str))
+        existing_ids = set(df_old["change_id"].astype(str))
+        változott    = False
+
+        # 1. LEZÁRT: AKTIV volt, de eltűnt az API-ból
+        for idx, row in df_old.iterrows():
+            if row["statusz"] == "AKTIV" and row["change_id"] not in api_ids:
+                print(f"LEZÁRT: change_id={row['change_id']} eltűnt az API-ból.")
+                df_old.at[idx, "statusz"]      = "LEZART"
+                df_old.at[idx, "Lejarva_Ideje"] = current_timestamp
+                változott = True
+
+        # 2. ÚJ: API-ban van, de Excelben még nincs
+        new_ids = api_ids - existing_ids
+        if new_ids:
+            df_new_entries = df_api[df_api["change_id"].isin(new_ids)].copy()
+            print(f"ÚJ bejegyzések: {len(df_new_entries)} db – change_id-k: {list(new_ids)}")
+            df_old = pd.concat([df_old, df_new_entries], ignore_index=True)
+            változott = True
+
+        if not változott:
+            print("Nincs változás – Excel nem módosul.")
+            return
+
+        df_old.to_excel(EXCEL_FILE, index=False)
+        print(f"Excel frissítve. Összes sor: {len(df_old)}")
 
     except requests.exceptions.Timeout:
-        print("Hiba: Az API nem válaszolt időben (timeout).")
+        print("Hiba: Timeout – az API nem válaszolt.")
     except requests.exceptions.ConnectionError:
         print("Hiba: Nem sikerült csatlakozni az API-hoz.")
     except ValueError as e:
-        print(f"JSON feldolgozási hiba: {e}")
+        print(f"JSON hiba: {e}")
     except Exception as e:
         print(f"Ismeretlen hiba: {e}")
         raise
