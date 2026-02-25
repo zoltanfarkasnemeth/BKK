@@ -1,27 +1,22 @@
 name: BKK Adatgyűjtő
 on:
   schedule:
-   cron: '*/5 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
-
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout kód
         uses: actions/checkout@v3
-
       - name: Python beállítása
         uses: actions/setup-python@v4
         with:
           python-version: '3.9'
-
       - name: Függőségek telepítése
         run: pip install -r requirements.txt
-
       - name: Adatgyűjtő futtatása
         run: python scraper.py
-
       - name: Változások mentése a GitHubra
         run: |
           git config --global user.name 'GitHub Actions Bot'
