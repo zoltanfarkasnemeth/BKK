@@ -32,7 +32,7 @@ def fetch_and_save():
         for entry in items:
             change_id  = str(entry.get("id", ""))
             start_date = entry.get("start_date", "-")
-            end_date   = entry.get("end_date",   "-")
+            end_date   = entry.get("end_date", "-")
             effects    = entry.get("effects", [])
 
             if effects:
@@ -61,46 +61,35 @@ def fetch_and_save():
         df_api = pd.DataFrame(api_rows)
         print(f"API-ból feldolgozott sorok: {len(df_api)}")
 
-        # --- ELSŐ FUTÁS: nincs még Excel ---
+        # ================================================================
+        # ELSŐ FUTÁS: Excel nem létezik VAGY üres/hibás → mindent mentünk
+        # ================================================================
+        first_run = False
         if not os.path.exists(EXCEL_FILE):
-            print("Első futás – minden adat mentése.")
+            first_run = True
+        else:
+            try:
+                df_check = pd.read_excel(EXCEL_FILE)
+                if df_check.empty or "statusz" not in df_check.columns:
+                    first_run = True
+            except:
+                first_run = True
+
+        if first_run:
+            print("ELSŐ FUTÁS – az összes jelenlegi API adat mentése.")
             df_api.to_excel(EXCEL_FILE, index=False)
             print(f"Elmentve {len(df_api)} sor.")
             return
 
-        # --- KÖVETKEZŐ FUTÁSOK ---
-        try:
-            df_old = pd.read_excel(EXCEL_FILE)
-
-            # Régi Excel oszlopok normalizálása - hiányzó oszlopok pótlása
-            df_old["change_id"]  = df_old["change_id"].astype(str) if "change_id" in df_old.columns else ""
-            df_old["start_date"] = df_old["start_date"].astype(str) if "start_date" in df_old.columns else "-"
-            df_old["end_date"]   = df_old["end_date"].astype(str) if "end_date" in df_old.columns else "-"
-
-            # statusz oszlop: ha nincs, mindenkit AKTIV-nak tekintünk
-            if "statusz" not in df_old.columns:
-                print("FIGYELEM: 'statusz' oszlop hiányzott – minden meglévő sor AKTIV-nak jelölve.")
-                df_old["statusz"] = "AKTIV"
-
-            # Lejarva_Ideje oszlop: ha nincs, üres
-            if "Lejarva_Ideje" not in df_old.columns:
-                print("FIGYELEM: 'Lejarva_Ideje' oszlop hiányzott – létrehozva.")
-                df_old["Lejarva_Ideje"] = ""
-            else:
-                df_old["Lejarva_Ideje"] = df_old["Lejarva_Ideje"].astype(str).replace("nan", "")
-
-            # Rogzites_Ideje oszlop: ha nincs, üres
-            if "Rogzites_Ideje" not in df_old.columns:
-                df_old["Rogzites_Ideje"] = ""
-
-            # pivot_id oszlop: ha nincs, üres
-            if "pivot_id" not in df_old.columns:
-                df_old["pivot_id"] = ""
-
-        except Exception as e:
-            print(f"Excel olvasási hiba, újrakezdés: {e}")
-            df_api.to_excel(EXCEL_FILE, index=False)
-            return
+        # ================================================================
+        # KÖVETKEZŐ FUTÁSOK
+        # ================================================================
+        df_old = pd.read_excel(EXCEL_FILE)
+        df_old["change_id"]     = df_old["change_id"].astype(str)
+        df_old["start_date"]    = df_old["start_date"].astype(str)
+        df_old["end_date"]      = df_old["end_date"].astype(str)
+        df_old["statusz"]       = df_old["statusz"].astype(str)
+        df_old["Lejarva_Ideje"] = df_old["Lejarva_Ideje"].fillna("").astype(str).replace("nan", "")
 
         api_ids      = set(df_api["change_id"].astype(str))
         existing_ids = set(df_old["change_id"].astype(str))
@@ -117,18 +106,19 @@ def fetch_and_save():
         # 2. ÚJ: API-ban van, de Excelben még nincs
         new_ids = api_ids - existing_ids
         if new_ids:
-            df_new_entries = df_api[df_api["change_id"].isin(new_ids)].copy()
-            print(f"ÚJ bejegyzések: {len(df_new_entries)} db – change_id-k: {list(new_ids)}")
-            df_old = pd.concat([df_old, df_new_entries], ignore_index=True)
+            df_uj = df_api[df_api["change_id"].isin(new_ids)].copy()
+            print(f"ÚJ bejegyzések: {len(df_uj)} db – change_id-k: {list(new_ids)}")
+            df_old = pd.concat([df_old, df_uj], ignore_index=True)
             változott = True
 
         if not változott:
             print("Nincs változás – Excel nem módosul.")
             return
 
-        # Oszlopok sorrendje
-        col_order = ["change_id", "pivot_id", "start_date", "end_date", "statusz", "Rogzites_Ideje", "Lejarva_Ideje"]
-        df_old = df_old[col_order]
+        # Oszlop sorrend
+        col_order = ["change_id", "pivot_id", "start_date", "end_date",
+                     "statusz", "Rogzites_Ideje", "Lejarva_Ideje"]
+        df_old = df_old.reindex(columns=col_order)
 
         df_old.to_excel(EXCEL_FILE, index=False)
         print(f"Excel frissítve. Összes sor: {len(df_old)}")
